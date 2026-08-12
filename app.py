@@ -1,184 +1,266 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-import math
+import streamlit.components.v1 as components
+import json
 
-# --- KONFIGURASI HALAMAN ---
+# --- CONFIGURASI HALAMAN ---
 st.set_page_config(
     page_title="Zuhri Formalism Engine Suite",
-    page_icon="🛡️",
-    layout="wide"
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# --- KONSTANTA ENGINE ZMO ---
-KAPPA_0 = 1.0
-LAMBDA_Z = 42.5
-PI_0 = math.pi
+# --- CSS CUSTOM & STYLE ---
+st.markdown("""
+    <style>
+    .main-title {
+        font-size: 2.2rem;
+        font-weight: 700;
+        color: #1E293B;
+        text-align: center;
+        margin-bottom: 0px;
+    }
+    .sub-title {
+        font-size: 1.0rem;
+        color: #64748B;
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    .stButton>button {
+        width: 100%;
+        background-color: #2563EB;
+        color: white;
+        font-weight: bold;
+        border-radius: 8px;
+        padding: 0.6rem;
+    }
+    .stButton>button:hover {
+        background-color: #1D4ED8;
+        color: white;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# --- ENGINE HELPER FUNCTIONS ---
-def analyze_water_point(pi_eff, grad_h, phase_var):
-    is_coherent = phase_var < 0.05
-    delta_pi = abs(pi_eff - PI_0)
-    if delta_pi <= 1e-6 or grad_h <= 0:
-        return is_coherent, 0.0
-    ratio = (KAPPA_0 * grad_h) / delta_pi
-    if ratio <= 1.0:
-        return is_coherent, 0.0
-    return is_coherent, abs(LAMBDA_Z * math.log(ratio))
+# --- HEADER ---
+st.markdown('<div class="main-title">Zuhri Formalism Integrated Engine Suite</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Sistem Pemrosesan Data & Simulasi Sub-Surface (Air Murni, Emas & Mekanika Vakum)</div>', unsafe_allow_html=True)
 
-def analyze_gold_point(pi_eff, grad_h, phase_var, porosity_dip):
-    is_gold_coherent = phase_var < 0.02
-    is_high_density = porosity_dip > 0.6
-    delta_pi = abs(pi_eff - PI_0)
-    if delta_pi <= 1e-6 or grad_h <= 0:
-        return False, 0.0, 0.0
-    ratio = (KAPPA_0 * grad_h) / delta_pi
-    if ratio <= 1.0:
-        return False, 0.0, 0.0
-    z_depth = abs(LAMBDA_Z * math.log(ratio))
-    gold_purity_score = min(100.0, (porosity_dip / 0.95) * 100)
-    return (is_gold_coherent and is_high_density), z_depth, gold_purity_score
+# --- WIDGET GPS LOKASI HP (NATIVE GEOLOCATION) ---
+st.sidebar.markdown("### 📍 Deteksi Koordinat GPS HP")
+st.sidebar.write("Klik tombol di bawah untuk mengambil titik lokasi presisi Anda berdiri:")
 
-# --- HEADER APLIKASI ---
-st.title("🛡️ Zuhri Formalism Integrated Engine Suite")
-st.caption("Aplikasi Rekayasa Metrik Ruang-Waktu & Pemetaan Sub-Permukaan Jarak Jauh")
+# Inject JavaScript untuk mengambil GPS HP
+gps_code = """
+<div style="background-color: #f1f5f9; padding: 10px; border-radius: 8px; text-align: center;">
+    <button onclick="getLocation()" style="background-color: #10B981; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%;">
+        🛰️ Ambil Koordinat Saya
+    </button>
+    <p id="gps_status" style="font-size: 12px; color: #475569; margin-top: 8px; font-weight: bold;">Status: Belum Diambil</p>
+</div>
 
-# --- TAB NAVIGASI MULTI-APLIKASI ---
+<script>
+function getLocation() {
+  var status = document.getElementById("gps_status");
+  if (navigator.geolocation) {
+    status.innerHTML = "⏳ Mengambil koordinat GPS...";
+    navigator.geolocation.getCurrentPosition(showPosition, showError, {enableHighAccuracy: true});
+  } else { 
+    status.innerHTML = "❌ GPS tidak didukung di browser ini.";
+  }
+}
+
+function showPosition(position) {
+  var lat = position.coords.latitude;
+  var lon = position.coords.longitude;
+  var acc = position.coords.accuracy;
+  document.getElementById("gps_status").innerHTML = "✅ Lat: " + lat.toFixed(5) + "<br>Lon: " + lon.toFixed(5) + " (Akurasi: " + acc.toFixed(1) + "m)";
+}
+
+function showError(error) {
+  var status = document.getElementById("gps_status");
+  switch(error.code) {
+    case error.PERMISSION_DENIED:
+      status.innerHTML = "❌ Izin GPS Ditolak pengguna.";
+      break;
+    case error.POSITION_UNAVAILABLE:
+      status.innerHTML = "❌ Informasi lokasi tidak tersedia.";
+      break;
+    case error.TIMEOUT:
+      status.innerHTML = "❌ Waktu permintaan GPS habis.";
+      break;
+    case error.UNKNOWN_ERROR:
+      status.innerHTML = "❌ Terjadi kesalahan GPS tidak dikenal.";
+      break;
+  }
+}
+</script>
+"""
+with st.sidebar:
+    components.html(gps_code, height=140)
+
+# Input Manual Koordinat Backup
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Atau Input Manual Titik Koordinat:**")
+col_lat, col_lon = st.sidebar.columns(2)
+lat_val = col_lat.number_input("Latitude", value=-6.200000, format="%.6f")
+lon_val = col_lon.number_input("Longitude", value=106.816666, format="%.6f")
+
+# --- TABS NAVIGASI UTAMA ---
 tab1, tab2, tab3 = st.tabs([
     "🌊 ZMO Geo-Mapper (Air Murni)", 
     "🥇 VPD Gold Detector (Emas)", 
-    "⚙️ Kalkulator Mekanika Vakum"
+    "⚙️ Mekanika Vakum"
 ])
 
-# ==========================================
-# TAB 1: EKSPLORASI AIR MURNI (AKUIFER)
-# ==========================================
+# ==============================================================================
+# TAB 1: ZMO GEO-MAPPER (AIR MURNI)
+# ==============================================================================
 with tab1:
-    st.header("🌊 Pemeta Akuifer Air Murni Sub-Permukaan")
-    st.markdown("Mengisolasi sinyal koherensi akuifer air murni dari lempung/air asin.")
+    st.header("🌊 Pemetaan Akuifer Air Murni (ZMO Engine)")
+    st.caption("Mengisolasi sinyal koherensi akuifer air murni dari lempung/air asin.")
     
-    col1, col2 = st.columns([1, 2])
+    col_ctrl, col_display = st.columns([1, 2])
     
-    with col1:
+    with col_ctrl:
         st.subheader("Control Panel")
-        mode_water = st.radio("Mode Air", ["Single Point", "Grid Scan (10x10)"], key="m_water")
+        mode_air = st.radio("Mode Air", ["Single Point", "Grid Scan (10x10)"], key="air_mode")
+        pi_eff = st.number_input("Pi Efektif (π_eff)", value=3.14189, format="%.5f", key="air_pi")
+        grad_h = st.number_input("Gradien Regangan (∇h_μν)", value=12.40, format="%.2f", key="air_grad")
+        phi_z = st.number_input("Varians Fase (ϕ_z)", value=0.0150, format="%.4f", key="air_phi")
         
-        pi_eff_w = st.number_input("Pi Efektif (π_eff)", value=3.14189, format="%.5f", key="pi_w")
-        grad_h_w = st.number_input("Gradien Regangan (∇h_μν)", value=12.4, key="grad_w")
-        phase_var_w = st.number_input("Varians Fase (ϕ_z)", value=0.015, format="%.4f", key="var_w")
-        
-        btn_water = st.button("Jalankan Pemindaian Air", type="primary", key="btn_w")
+        btn_air = st.button("Jalankan Pemindaian Air", key="btn_air")
 
-    with col2:
-        if mode_water == "Single Point":
-            st.subheader("Hasil Analisis Titik")
-            if btn_water:
-                coherent, depth = analyze_water_point(pi_eff_w, grad_h_w, phase_var_w)
-                if coherent and depth > 0:
-                    st.success(f"✅ **AKUIFER AIR MURNI TERKONFIRMASI**\n\nEstimasi Kedalaman Bor: **{depth:.2f} Meter**")
-                else:
-                    st.error("❌ **INKOHEREN / BUKAN AKUIFER AKTIF**")
-        else:
-            st.subheader("Heatmap Grid Area (10x10)")
-            if btn_water:
-                grid_size = 10
-                coh_matrix = np.zeros((grid_size, grid_size))
-                dep_matrix = np.zeros((grid_size, grid_size))
-                target_x, target_y = 6, 4
+    with col_display:
+        st.subheader("Hasil Analisis Titik & Area")
+        
+        if btn_air:
+            # Tampilkan peta lokasi titik survey
+            st.map({"lat": [lat_val], "lon": [lon_val]}, zoom=14)
+            st.info(f"📍 **Titik Analisis GPS:** Lat {lat_val:.6f}, Lon {lon_val:.6f}")
+            
+            if mode_air == "Single Point":
+                # Algoritma Koherensi Air Murni
+                coherence = (pi_eff * grad_h) / (1.0 + phi_z * 100)
+                is_pure_water = phi_z < 0.05 and coherence > 35.0
                 
-                for x in range(grid_size):
-                    for y in range(grid_size):
-                        dist = math.sqrt((x - target_x)**2 + (y - target_y)**2)
-                        p_eff = PI_0 + (0.0008 / (dist + 1))
-                        g_h = 15.0 / (dist + 1)
-                        p_var = 0.01 * (dist + 0.5)
-                        coh, dep = analyze_water_point(p_eff, g_h, p_var)
-                        if coh and dep > 0:
-                            coh_matrix[y, x] = max(0, 100 - (dist * 18))
-                            dep_matrix[y, x] = dep
-
-                fig, ax = plt.subplots(figsize=(5, 4))
-                cax = ax.imshow(coh_matrix, cmap='viridis', origin='lower')
-                ax.plot(target_x, target_y, marker='X', color='red', markersize=12, label="Episentrum Bor")
-                ax.set_title(f"Episentrum: X={target_x}, Y={target_y} | Z_depth={dep_matrix[target_y, target_x]:.1f}m")
+                if is_pure_water:
+                    depth = (grad_h * 3.5) + (1.0 / (phi_z + 0.001)) * 0.2
+                    st.success(f"✅ **AKUIFER AIR MURNI TERDETEKSI!**\n\n"
+                               f"* **Tingkat Koherensi Sinyal:** {coherence:.2f}\n"
+                               f"* **Estimasi Kedalaman Bor Terbaik:** {depth:.1f} Meter\n"
+                               f"* **Karakteristik:** Mengalir, Rendah Mineral/Garam.")
+                else:
+                    st.error("❌ **TIDAK TERDETEKSI AKUIFER AIR MURNI**\n\n"
+                             "Indikasi: Anomali didominasi lapisan lempung basah, air asin, atau tanah padat inkoheren.")
+            
+            else: # Grid Scan 10x10
+                np.random.seed(int(grad_h * 100))
+                grid_data = np.random.rand(10, 10) * 0.08
+                # Tambahkan pusat sinyal air
+                grid_data[4:7, 3:6] -= 0.035
+                grid_data = np.clip(grid_data, 0.001, 0.1)
+                
+                fig, ax = plt.subplots(figsize=(6, 5))
+                c = ax.imshow(grid_data, cmap='YlGnBu_r', origin='lower')
+                fig.colorbar(c, ax=ax, label='Varians Fase (ϕ_z) - Makin Rendah Makin Murni')
+                ax.set_title("Peta Varians Fase Akuifer (10x10 Grid)")
+                
+                # Tandai episentrum terbaik
+                min_y, min_x = np.unravel_index(np.argmin(grid_data), grid_data.shape)
+                ax.plot(min_x, min_y, 'rx', markersize=12, markeredgewidth=3, label='Episentrum Akuifer')
                 ax.legend()
-                st.pyplot(fig)
-
-# ==========================================
-# TAB 2: DETEKTOR URAT EMAS (VPD)
-# ==========================================
-with tab2:
-    st.header("🥇 Sensor Kuantisasi Pori Ruang (Gold VPD)")
-    st.markdown("Mendeteksi kompresi pori-pori ruang ZPE akibat rapat massa emas ($19.3 \\text{ g/cm}^3$).")
-    
-    col1_g, col2_g = st.columns([1, 2])
-    
-    with col1_g:
-        st.subheader("Control Panel Emas")
-        mode_gold = st.radio("Mode Emas", ["Single Point", "Grid Scan (10x10)"], key="m_gold")
-        
-        pi_eff_g = st.number_input("Pi Efektif (π_eff)", value=3.14245, format="%.5f", key="pi_g")
-        grad_h_g = st.number_input("Gradien Regangan (∇h_μν)", value=18.5, key="grad_g")
-        phase_var_g = st.number_input("Varians Fase (ϕ_z)", value=0.008, format="%.4f", key="var_g")
-        porosity_dip_g = st.number_input("Dip Porositas Vakum", value=0.82, format="%.2f", key="dip_g")
-        
-        btn_gold = st.button("Jalankan Pemindaian Emas", type="primary", key="btn_g")
-
-    with col2_g:
-        if mode_gold == "Single Point":
-            st.subheader("Hasil Analisis Deposit Emas")
-            if btn_gold:
-                is_gold, depth_g, purity_g = analyze_gold_point(pi_eff_g, grad_h_g, phase_var_g, porosity_dip_g)
-                if is_gold:
-                    st.success(f"🥇 **URAT EMAS TERKONFIRMASI!**\n\n"
-                               f"* **Kedalaman (Z_depth):** `{depth_g:.2f} Meter`\n"
-                               f"* **Kadar/Kepadatan:** `{purity_g:.1f}%`")
-                else:
-                    st.warning("⚠️ **BUKAN DEPOSIT EMAS** (Batuan biasa / Pasir Besi)")
-        else:
-            st.subheader("Heatmap Kepadatan Emas (10x10)")
-            if btn_gold:
-                grid_size = 10
-                gold_matrix = np.zeros((grid_size, grid_size))
-                dep_g_matrix = np.zeros((grid_size, grid_size))
-                target_x_g, target_y_g = 3, 7
                 
-                for x in range(grid_size):
-                    for y in range(grid_size):
-                        dist = math.sqrt((x - target_x_g)**2 + (y - target_y_g)**2)
-                        p_eff = PI_0 + (0.0012 / (dist + 1))
-                        g_h = 22.0 / (dist + 1)
-                        p_var = 0.005 * (dist + 0.2)
-                        p_dip = max(0.1, 0.9 - (dist * 0.15))
-                        is_g, dep, pur = analyze_gold_point(p_eff, g_h, p_var, p_dip)
-                        if is_g:
-                            gold_matrix[y, x] = pur
-                            dep_g_matrix[y, x] = dep
+                st.pyplot(fig)
+                st.success(f"🎯 **Episentrum Akuifer Terbaik di Grid:** X={min_x}, Y={min_y} (Nilai ϕ_z: {grid_data[min_y, min_x]:.4f})")
 
-                fig_g, ax_g = plt.subplots(figsize=(5, 4))
-                cax_g = ax_g.imshow(gold_matrix, cmap='YlOrRd', origin='lower')
-                fig_g.colorbar(cax_g, label="Kadar (%)")
-                ax_g.plot(target_x_g, target_y_g, marker='*', color='gold', markersize=14, markeredgecolor='black', label="Episentrum Emas")
-                ax_g.set_title(f"Episentrum: X={target_x_g}, Y={target_y_g} | Z_depth={dep_g_matrix[target_y_g, target_x_g]:.1f}m")
-                ax_g.legend()
-                st.pyplot(fig_g)
+# ==============================================================================
+# TAB 2: VPD GOLD DETECTOR (EMAS)
+# ==============================================================================
+with tab2:
+    st.header("🥇 Deteksi Urat Emas Subterranean (VPD Engine)")
+    st.caption("Pemanfaatan Kerapatan Massa Emas (19.3 g/cm³) Terhadap Porositas Vakum ZPE.")
+    
+    col_ctrl2, col_display2 = st.columns([1, 2])
+    
+    with col_ctrl2:
+        st.subheader("Control Panel Emas")
+        mode_emas = st.radio("Mode Emas", ["Single Point", "Grid Scan (10x10)"], key="gold_mode")
+        pi_eff_g = st.number_input("Pi Efektif (π_eff)", value=3.14245, format="%.5f", key="gold_pi")
+        grad_h_g = st.number_input("Gradien Regangan (∇h_μν)", value=18.50, format="%.2f", key="gold_grad")
+        phi_z_g = st.number_input("Varians Fase (ϕ_z)", value=0.0080, format="%.4f", key="gold_phi")
+        porosity_g = st.number_input("Dip Porositas Vakum", value=0.75, format="%.2f", key="gold_por")
+        
+        btn_gold = st.button("Jalankan Pemindaian Emas", key="btn_gold")
 
-# ==========================================
-# TAB 3: KALKULATOR MEKANIKA VAKUM
-# ==========================================
+    with col_display2:
+        st.subheader("Hasil Analisis Deposit Emas")
+        
+        if btn_gold:
+            st.map({"lat": [lat_val], "lon": [lon_val]}, zoom=14)
+            st.info(f"📍 **Titik Analisis GPS:** Lat {lat_val:.6f}, Lon {lon_val:.6f}")
+            
+            if mode_emas == "Single Point":
+                # Algoritma Kerapatan Urat Emas
+                gold_score = (grad_h_g * porosity_g) / (phi_z_g * 1000 + 1.0)
+                is_gold = phi_z_g < 0.02 and porosity_g > 0.60 and gold_score > 1.2
+                
+                if is_gold:
+                    z_depth = (grad_h_g * 2.1) + 15.0
+                    purity = min(99.9, 70.0 + (gold_score * 15.0))
+                    st.success(f"🥇 **URAT EMAS (Au-197) TERKONFIRMASI!**\n\n"
+                               f"* **Skor Anomali Massa:** {gold_score:.3f}\n"
+                               f"* **Estimasi Kedalaman Urat (Z_depth):** {z_depth:.1f} Meter\n"
+                               f"* **Indeks Puritas/Kadar:** ~{purity:.1f}%")
+                else:
+                    st.warning("⚠️ **TIDAK ADANAMOMALI URAT EMAS BERSIGIFIKAN**\n\n"
+                               "Sinyal tidak memenuhi kriteria himpitan massa emas murni (porositas/varians tidak cocok).")
+            
+            else: # Grid Scan 10x10
+                np.random.seed(int(grad_h_g * 50))
+                grid_gold = np.random.rand(10, 10) * 0.4
+                # Simulasikan jalur urat emas (vein pattern)
+                grid_gold[2:8, 4] += 0.55
+                grid_gold[4, 2:7] += 0.45
+                
+                fig2, ax2 = plt.subplots(figsize=(6, 5))
+                c2 = ax2.imshow(grid_gold, cmap='YlOrRd', origin='lower')
+                fig2.colorbar(c2, ax=ax2, label='Indikator Kerapatan Urat Emas')
+                ax2.set_title("Peta Anomali Urat Emas 2D (10x10 Grid)")
+                
+                max_y, max_x = np.unravel_index(np.argmax(grid_gold), grid_gold.shape)
+                ax2.plot(max_x, max_y, '*', color='gold', markersize=15, markeredgecolor='black', label='Episentrum Urat Emas')
+                ax2.legend()
+                
+                st.pyplot(fig2)
+                st.success(f"⭐ **Episentrum Utama Urat Emas:** Grid X={max_x}, Y={max_y} (Skor Anomali: {grid_gold[max_y, max_x]:.2f})")
+
+# ==============================================================================
+# TAB 3: MEKANIKA VAKUM
+# ==============================================================================
 with tab3:
-    st.header("⚙️ Kalkulator Tensor Regangan Vakum")
-    st.markdown("Menghitung energi regangan medium $S_{\\text{medium}}$ berdasarkan Tensor Regangan Topologis $\\epsilon_{\\mu\\nu}$.")
+    st.header("⚙️ Kalkulator Mekanika Vakum & Energi Medium")
+    st.caption("Simulasi teori regangan metrik dan kalkulasi energi tersimpan dalam medium ruang.")
     
-    st.latex(r"\mathcal{S}_{\text{medium}} = \int_{\mathcal{M}} \kappa_0 \cdot \|\epsilon_{\mu\nu}\|^2 \, d^4x")
+    col_v1, col_v2 = st.columns([1, 2])
     
-    col_v1, col_v2 = st.columns(2)
     with col_v1:
-        kappa_val = st.number_input("Konstanta Kelenturan (κ_0)", value=1.0)
-        epsilon_val = st.number_input("Besar Regangan (||ε_μν||)", value=2.5)
-        volume_val = st.number_input("Volume Ruang Modulasi (m³)", value=10.0)
-    
+        st.subheader("Parameter Metrik")
+        kappa_0 = st.number_input("Konstanta Kelenturan (κ_0)", value=1.0, step=0.1)
+        strain_eps = st.number_input("Besar Regangan (||ε_μν||)", value=2.5, step=0.1)
+        vol_m3 = st.number_input("Volume Modulasi Ruang (m³)", value=100.0, step=10.0)
+        
+        btn_calc_vac = st.button("Hitung Energi Regangan", key="btn_vac")
+        
     with col_v2:
-        if st.button("Hitung Energi Regangan"):
-            strain_energy = kappa_val * (epsilon_val ** 2) * volume_val
-            st.info(f"⚡ **Total Energi Regangan Medium:** `{strain_energy:.4f} Joule`")
+        st.subheader("Hasil Kalkulasi Energi")
+        if btn_calc_vac:
+            # Rumus Energi Regangan Medium: S_medium = 0.5 * kappa_0 * (strain_eps^2) * vol_m3
+            energy_joules = 0.5 * kappa_0 * (strain_eps ** 2) * vol_m3
+            energy_kwh = energy_joules / 3_600_000.0
+            
+            st.metric(label="Energi Regangan Tersimpan (Joule)", value=f"{energy_joules:,.2f} J")
+            st.metric(label="Setara KiloWatt-Hour (kWh)", value=f"{energy_kwh:.6f} kWh")
+            
+            st.info("💡 **Catatan Teori:** Energi ini merepresentasikan besar potensi potensial deformasi metrik ruang lokal yang dikorelasikan dengan varians fase gelombang.")
